@@ -110,13 +110,14 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - name: Record npm security audit (nonblocking)
-        continue-on-error: true
-        run: npm audit --json > npm-audit.json
+      - name: Audit dependencies (block high and critical)
+        run: npm audit --audit-level=high --json > npm-audit.json
       - name: Controller tests (not DOM tests)
         run: npm test 2>&1 | tee frontend-tests.txt
       - run: npm run build
-      - run: npx --no-install tsc --noEmit
+      - run: npm run typecheck
+      - name: Sharp native image processing smoke
+        run: node -e "require('sharp')({create:{width:1,height:1,channels:3,background:'#fff'}}).png().toBuffer().then(b=>{if(!b.length)process.exit(1)}).catch(e=>{console.error(e);process.exit(1)})"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
