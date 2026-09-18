@@ -78,6 +78,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - name: Record npm security audit (nonblocking)
+        continue-on-error: true
+        run: npm audit --json > npm-audit.json
       - name: Controller tests (not DOM tests)
         run: npm test 2>&1 | tee frontend-tests.txt
       - run: npm run build
@@ -101,5 +104,6 @@ jobs:
           path: |
             web/frontend-tests.txt
             web/resolved-node-dependencies.txt
+            web/npm-audit.json
             web/test-results/
           retention-days: 14
