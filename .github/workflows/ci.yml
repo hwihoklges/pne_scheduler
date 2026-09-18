@@ -14,6 +14,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  dependency-lock-candidate:
+    # Manual, read-only maintenance: produce a reviewed lockfile artifact.
+    # No write token, automatic commit, or default-branch dependency mutation.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Resolve patched maintenance version
+        run: npm install --package-lock-only --ignore-scripts --save-exact next@15.5.25
+      - name: Audit candidate
+        run: npm audit --audit-level=high --json > npm-audit-candidate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-lock-candidate
+          path: |
+            web/package.json
+            web/package-lock.json
+            web/npm-audit-candidate.json
+          retention-days: 7
+
   test:
     strategy:
       fail-fast: false
