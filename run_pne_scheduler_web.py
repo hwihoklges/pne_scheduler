@@ -46,6 +46,11 @@ def _wait(url: str, timeout: float, what: str) -> bool:
 
 
 def main() -> int:
+    # This convenience launcher is deliberately not a shared deployment tool.
+    # Cloud-safe service processes require an external TLS/auth gateway.
+    if os.getenv("PNE_SERVER_MODE", "local") != "local":
+        print("Workspace launcher is local-only; configure cloud services separately.", file=sys.stderr)
+        return 2
     if not WEB.is_dir():
         print(f"web/ 폴더가 없습니다: {WEB}", file=sys.stderr)
         return 2

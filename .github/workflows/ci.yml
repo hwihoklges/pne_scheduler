@@ -1,5 +1,12 @@
 name: pne-scheduler-ci
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, master]
@@ -8,24 +15,91 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.14"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: false
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Install
+        shell: bash
         run: |
           python -m pip install -U pip
-          pip install -e ".[dev,web]"
+          if [ "${{ matrix.python }}" = "3.14" ]; then
+            python -m pip install -c constraints/py314.txt -e ".[dev,web]"
+          else
+            python -m pip install -e ".[dev,web]"
+          fi
+      - name: Record resolved dependencies
+        run: python -m pip freeze > resolved-dependencies.txt
       - name: Ruff
         run: ruff check .
       - name: Pytest
-        run: python -m pytest tests/ -q --tb=short
-      # tests/test_workspace_qt.py skips itself on a missing PySide6, so a failed
-      # install would hide the default UI's only coverage behind a green run.
-      # That import is the sole skip condition, so asserting it closes the hole.
+        run: python -m pytest tests/ -q --tb=short -rs --junitxml=test-results.xml
       - name: Assert Flask is installed (the API tests must not skip)
-        run: python -c "import flask; print('flask', flask.__version__)"
+        run: python -c "import flask; from importlib.metadata import version; print('flask', version('flask'))"
       - name: Corpus report smoke (in-repo zips)
         run: python tools/compare_pne_units.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-${{ matrix.os }}-${{ matrix.python }}
+          path: |
+            test-results.xml
+            resolved-dependencies.txt
+          retention-days: 14
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Controller tests (not DOM tests)
+        run: npm test 2>&1 | tee frontend-tests.txt
+      - run: npm run build
+      - run: npx --no-install tsc --noEmit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Browser and Flask proxy smoke
+        run: |
+          python -m pip install -c ../constraints/py314.txt -e "..[web]"
+          npm install --no-save --package-lock=false @playwright/test@1.56.1
+          npx --no-install playwright install --with-deps chromium
+          npx --no-install playwright test --config=playwright.config.mjs
+      - name: Record resolved dependencies
+        if: always()
+        run: npm ls --all > resolved-node-dependencies.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-node22
+          path: |
+            web/frontend-tests.txt
+            web/resolved-node-dependencies.txt
+            web/test-results/
+          retention-days: 14

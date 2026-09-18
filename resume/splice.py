@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from ..io.atomic_output import output_lock, publish_pair, require_distinct_paths, staged_path
 from ..io.sch_binary import (
     SchBinaryDocument,
     SchBinaryStep,
@@ -101,6 +103,50 @@ def splice_resume_schedule(
     remaining_loop_count: int | None = None,
     validation_manifest_path: str | Path | None = None,
 ) -> ResumeResult:
+    """Validate staged output/manifest before publishing either destination.
+
+    Source and progress files must never alias any destination. Publication is
+    exception-safe for existing outputs, but not a two-file crash transaction.
+    """
+    source, data, out = Path(sch_path), Path(data_path), Path(output_path)
+    manifest = (
+        Path(validation_manifest_path)
+        if validation_manifest_path is not None
+        else default_manifest_path(out)
+    )
+    require_distinct_paths(source, data, out, manifest)
+    for destination in (out, manifest):
+        if (not destination.parent.is_dir() or destination.is_symlink()
+                or (destination.exists() and not destination.is_file())):
+            raise ValueError(f"Invalid output destination: {destination}")
+    with output_lock(out, source, data, manifest), output_lock(manifest, source, data, out):
+        with staged_path(out) as staged, staged_path(manifest) as staged_manifest:
+            result = _splice_resume_schedule(
+                source, data, staged,
+                resume_sch_step=resume_sch_step,
+                remaining_loop_count=remaining_loop_count,
+                validation_manifest_path=staged_manifest,
+                published_output=out,
+            )
+            publish_pair(staged, out, staged_manifest, manifest)
+    return replace(
+        result, output_path=out, manifest_path=manifest,
+        document=replace(result.document, path=out),
+    )
+
+
+def _splice_resume_schedule(
+    sch_path: str | Path,
+    data_path: str | Path,
+    output_path: str | Path,
+    *,
+    resume_sch_step: int | None = None,
+    remaining_loop_count: int | None = None,
+    validation_manifest_path: str | Path | None = None,
+    published_output: Path,
+) -> ResumeResult:
+    source_bytes = Path(sch_path).read_bytes()
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
     plan = build_resume_plan(
         sch_path,
         data_path,
@@ -138,12 +184,15 @@ def splice_resume_schedule(
         if validation_manifest_path is not None
         else default_manifest_path(out)
     )
-    output_existed = out.exists()
-    manifest_existed = manifest_path.exists()
     write_sch_binary(resumed, out)
 
     plan.resumed_step_count = len(selected)
     written = read_sch_binary(out)
+    if (
+        written.header != doc.header or written.steps != resumed.steps
+        or written.step_size != doc.step_size or not written.steps[-1].is_end
+    ):
+        raise ValueError("Resumed output failed structural re-read validation")
     changed_fields = [
         {
             "operation": "splice_and_renumber",
@@ -184,14 +233,13 @@ def splice_resume_schedule(
             "Resume output has not passed an equipment smoke test.",
         ],
     )
-    try:
-        write_validation_manifest(manifest_path, manifest)
-    except (OSError, TypeError, ValueError):
-        if not output_existed:
-            out.unlink(missing_ok=True)
-        if not manifest_existed:
-            manifest_path.unlink(missing_ok=True)
-        raise
+    # Hashes were captured from source and validated staging, before promotion.
+    if plan.source_sch.read_bytes() != source_bytes:
+        raise ValueError("Source changed during resume validation")
+    manifest["template"]["sha256"] = source_hash
+    manifest["template"]["size"] = len(source_bytes)
+    manifest["output"]["path"] = str(published_output)
+    write_validation_manifest(manifest_path, manifest)
     return ResumeResult(
         plan=plan,
         output_path=out,

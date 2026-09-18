@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,10 +20,19 @@ class StepEndRow:
     total_cycle: int | None
     cycle_num: int | None
     step_time_sec: float | None
+    # None preserves code-based interpretation for older callers/StepEnd files.
+    step_completed: bool | None = None
 
 
 @dataclass
 class ExperimentCheckpoint:
+    """Latest observed progress and a conservative resume decision.
+
+    The historical ``last_completed_*`` field names remain API-compatible: on
+    interrupted data they identify the observed step, not proof of completion.
+    Always interpret them together with ``step_completed``.
+    """
+
     source_sch: Path | None
     data_path: Path
     last_completed_cts_step: int
@@ -39,7 +49,17 @@ class ExperimentCheckpoint:
 
 
 _COMPLETION_FINISHED = re.compile(r"last\s*step|experiment\s*end|end\s*step", re.I)
-_COMPLETION_OK = re.compile(r"complete", re.I)
+_COMPLETION_OK = re.compile(r"\b(?:complete|completed|stepend)\b", re.I)
+_COMPLETION_NOT_OK = re.compile(r"\b(?:incomplete|not\s+complete(?:d)?)\b", re.I)
+
+
+def _is_completed(row: StepEndRow) -> bool:
+    if row.step_completed is not None:
+        return row.step_completed
+    return bool(
+        _COMPLETION_OK.search(row.completion_code)
+        and not _COMPLETION_NOT_OK.search(row.completion_code)
+    )
 
 
 def _parse_int(value: str | None) -> int | None:
@@ -49,8 +69,9 @@ def _parse_int(value: str | None) -> int | None:
     if not text:
         return None
     try:
-        return int(float(text))
-    except ValueError:
+        number = float(text)
+        return int(number) if math.isfinite(number) and number.is_integer() else None
+    except (ValueError, OverflowError):
         return None
 
 
@@ -104,9 +125,9 @@ def load_stepend_csv(path: str | Path, *, encoding: str = "cp949") -> list[StepE
 
         for raw in reader:
             cts_step = _parse_int(raw.get(step_col))
-            if cts_step is None or cts_step <= 0:
+            if cts_step is None or cts_step <= CTS_STEP_OFFSET:
                 continue
-            sch_step = max(1, cts_step - CTS_STEP_OFFSET)
+            sch_step = cts_step - CTS_STEP_OFFSET
             rows.append(
                 StepEndRow(
                     cts_step_no=cts_step,
@@ -122,7 +143,11 @@ def load_stepend_csv(path: str | Path, *, encoding: str = "cp949") -> list[StepE
 
 
 def load_raw_csv_checkpoint(path: str | Path, *, encoding: str = "cp949") -> StepEndRow | None:
-    """Use last StepEnd-flagged row or last data row from raw CSV."""
+    """Use the latest valid SCH progress row, including an unfinished leg.
+
+    CTS step 1 is the preamble, not SCH step 1. A raw StepEnd flag is explicit
+    evidence of completion; step type alone (notably Rest) is not.
+    """
     resolved = Path(path)
     last: StepEndRow | None = None
     with resolved.open("r", encoding=encoding, newline="") as handle:
@@ -141,7 +166,7 @@ def load_raw_csv_checkpoint(path: str | Path, *, encoding: str = "cp949") -> Ste
 
         for raw in reader:
             cts_step = _parse_int(raw.get(step_col))
-            if cts_step is None:
+            if cts_step is None or cts_step <= CTS_STEP_OFFSET:
                 continue
             is_stepend = False
             if stepend_col is not None:
@@ -149,15 +174,18 @@ def load_raw_csv_checkpoint(path: str | Path, *, encoding: str = "cp949") -> Ste
                 is_stepend = val in {"1", "true", "yes"}
             row = StepEndRow(
                 cts_step_no=cts_step,
-                sch_step_no=max(1, cts_step - CTS_STEP_OFFSET),
+                sch_step_no=cts_step - CTS_STEP_OFFSET,
                 step_type=str(raw.get(colmap.get("StepType", ""), "")).strip(),
-                completion_code="StepEnd" if is_stepend else "InProgress",
+                completion_code=(
+                    str(raw.get(colmap.get("Code", ""), "")).strip()
+                    or ("StepEnd" if is_stepend else "InProgress")
+                ),
                 total_cycle=_parse_int(raw.get(colmap.get("TotalCycle", ""))),
                 cycle_num=_parse_int(raw.get(colmap.get("CycleNum", ""))),
                 step_time_sec=_parse_float(raw.get(colmap.get("StepTime_sec", ""))),
+                step_completed=is_stepend,
             )
-            if is_stepend or last is None:
-                last = row
+            last = row
     return last
 
 
@@ -191,7 +219,7 @@ def detect_checkpoint(
         or step_type == "end"
         or "last step" in code.lower()
     )
-    step_completed = bool(_COMPLETION_OK.search(code)) or step_type in {"end", "rest"}
+    step_completed = is_finished or _is_completed(last)
 
     if is_finished:
         resume_sch = last.sch_step_no
@@ -230,7 +258,7 @@ def _infer_completed_loops(rows: list[StepEndRow]) -> int | None:
     discharge_ends = [
         r
         for r in rows
-        if r.step_type.lower() == "discharge" and _COMPLETION_OK.search(r.completion_code)
+        if r.step_type.lower() == "discharge" and _is_completed(r)
     ]
     if discharge_ends:
         return len(discharge_ends)

@@ -1,8 +1,10 @@
 """PNE Scheduler web API launcher (localhost only).
 
-The lab PC holds the `.sch` originals and the CTSPro-authored templates. A server
-that can read and write those must not be reachable from the network, so the
-default bind is 127.0.0.1 and widening it is a deliberate argument.
+The bind is 127.0.0.1. Local mode additionally validates Host, Origin and peer;
+PNE_LOCAL_RESOURCES=0 disables local filesystem routes. PNE_SERVER_MODE=cloud
+always disables them and requires PNE_API_TOKEN and PNE_ALLOWED_HOSTS (see
+api.security). Shared hosting needs a separate TLS/auth gateway, not this
+convenience launcher. Tokens must never be sent to browser storage.
 """
 
 import sys

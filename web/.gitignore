@@ -2,3 +2,6 @@ node_modules/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+.test-build/
+test-results/
+playwright-report/

@@ -21,6 +21,7 @@ from ..import_session import ImportSession
 from ..library import MethodLibrary
 from . import routes
 from .errors import ApiError
+from .security import AccessPolicy, is_loopback_host
 
 # An import session is a held-open file, not a login. It expires so a forgotten
 # browser tab cannot pin a lab file's bytes in memory for a day.
@@ -58,12 +59,32 @@ class SessionRegistry:
         return found[1]
 
 
-def create_app(library_root: Path | None = None) -> Any:
+def create_app(library_root: Path | None = None, *, mode: str | None = None,
+               local_resources: bool | None = None) -> Any:
+    """Create a backwards-compatible local app; see security.AccessPolicy for env.
+
+    Cloud mode authenticates all routes and never constructs a local library or
+    exposes filesystem/import sessions. No bearer token is returned to clients.
+    """
     from flask import Flask, jsonify, request
+    from werkzeug.exceptions import HTTPException
 
     app = Flask(__name__)
-    store = MethodLibrary(library_root)
+    policy = AccessPolicy.from_environment(mode=mode, local_resources=local_resources)
+    app.config["PNE_SERVER_MODE"] = policy.mode
+    store = MethodLibrary(library_root) if policy.local_resources else None
     sessions = SessionRegistry()
+
+    @app.before_request
+    def _guard():
+        policy.check_request(
+            host=request.host, remote_addr=request.remote_addr,
+            origin=request.headers.get("Origin"),
+            fetch_site=request.headers.get("Sec-Fetch-Site"),
+            authorization=request.headers.get("Authorization", ""),
+        )
+        if routes.is_local_resource_path(request.path) and not policy.local_resources:
+            raise ApiError("Local-resource routes are disabled", status=403)
 
     @app.errorhandler(ApiError)
     def _handle(error: ApiError):
@@ -73,8 +94,10 @@ def create_app(library_root: Path | None = None) -> Any:
     def _unexpected(error: Exception):
         # A bug must still reach the client as JSON: an HTML traceback page in a
         # fetch() response surfaces as an unreadable parse error instead.
+        if isinstance(error, HTTPException):
+            return jsonify({"ok": False, "error": error.name}), error.code
         app.logger.exception("unhandled API error")
-        return jsonify({"ok": False, "error": f"서버 오류: {error}"}), 500
+        return jsonify({"ok": False, "error": "Internal server error"}), 500
 
     def body() -> dict[str, Any]:
         data = request.get_json(silent=True)
@@ -157,19 +180,23 @@ def create_app(library_root: Path | None = None) -> Any:
 
     @app.get("/api/health")
     def _health():
-        return jsonify({"ok": True, "libraryRoot": str(store.root)})
+        return jsonify({"ok": True, "mode": policy.mode,
+                        "localResources": policy.local_resources})
 
     return app
 
 
 def main(host: str = "127.0.0.1", port: int = 8000) -> int:
-    """Serve on localhost only.
+    """Serve on loopback by default; local mode forbids a routable bind.
 
-    The lab PC holds the `.sch` originals and the CTSPro-authored templates; a
-    server that can write those must not be reachable from the network. Binding
-    to a routable address is a deliberate act, not a default.
+    PNE_SERVER_MODE=cloud can be hosted separately behind a TLS/auth gateway,
+    with filesystem routes disabled and PNE_API_TOKEN/PNE_ALLOWED_HOSTS set.
+    This development server is not a production multi-user deployment stack.
     """
-    create_app().run(host=host, port=port)
+    app = create_app()
+    if app.config["PNE_SERVER_MODE"] == "local" and not is_loopback_host(host):
+        raise ValueError("Local-resource API must bind to loopback")
+    app.run(host=host, port=port)
     return 0
 
 

@@ -1067,3 +1067,12 @@ relevant Gate task table (§6.2–6.7). Closed items stay for audit trail.
 | 2026-09-08 | E | high | 모듈 합성 계약 부재: 일부 모듈이 자체 END를 내보내고 LOOP target을 모듈-local raw 번호로 저장해, 여러 모듈 연결 시 non-final END나 잘못된 goto가 생길 수 있음. `qpeed:soc_setting` LOOP는 target/count도 없음 | resolved 2026-09-09 | Composer가 단일 최종 END 소유; fragment-local reference와 legacy local target을 절대 step으로 resolve; invalid LOOP 차단; 다중 loop-module 회귀 추가. [`GATE_E_PLAN.md`](GATE_E_PLAN.md) §3.1/§5 |
 | 2026-09-08 | D/E | high | Gate D family-level green과 실제 protocol-pattern 충실도가 분리되지 않음: QPEED full은 짧은 HPPC 상속 구현이었고 golden은 167 step, HPPC golden은 62 step, QC module은 없었음 | partial 2026-09-09 | HPPC 62-step, QPEED 167/11-step 및 QC 3종 구현, trust catalog/preflight와 10-pattern reopen pack 생성 완료. 기존 family-template exact recipe와 PV1/PV4는 open. [`PATTERN_VALIDATION_PLAN.md`](PATTERN_VALIDATION_PLAN.md) |
 | | | | *(add new rows here)* | | |
+
+## 2026-09-18 Review — 정확성 및 기능 확장
+
+기존 Gate·controlled-pair·장비별 이력은 그대로 유지한다. 현재 리뷰의 구현 상태와 이후 우선순위는 [정확성 리뷰 및 실행 로드맵](../docs/CORRECTNESS_REVIEW_2026-09.md)을 함께 읽는다.
+
+- **구현됨:** resume/checkpoint/splice, template 출력·협력 lock·예외 복구, API local/cloud 정책 및 frontend 변경 queue의 회귀 방어. 새 CI matrix의 원격 통과는 별도 확인 대상이다.
+- **실험적:** 장비 실행 미승인 출력. `equipment_executable=false`, LOOP 수동 검토 및 CTS/장비 검증은 유지한다.
+- **계획:** typed DSL/schema migration → graph/timeline·semantic diff/승인 → resume dry-run/replay·target capability → DOE/채널 simulation → CycleDiag manifest 피드백 → tenant-isolated cloud jobs. 단계별 의존성·산출물·인수 기준은 연결 문서에서 관리한다.
+- 과거 Gate 완료는 특정 증거 범위에 한정되며 범용 장비 승인이나 다중 tenant 보안 인증으로 확대 해석하지 않는다.
