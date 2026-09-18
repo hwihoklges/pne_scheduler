@@ -29,7 +29,11 @@ jobs:
         with:
           node-version: "22"
       - name: Resolve patched maintenance version
-        run: npm install --package-lock-only --ignore-scripts --save-exact next@15.5.25
+        run: |
+          npm view postcss@8.5.23 version engines --json
+          npm view sharp@0.35.4 version engines --json
+          npm pkg set overrides.postcss=8.5.23 overrides.sharp=0.35.4
+          npm install --package-lock-only --ignore-scripts --save-exact next@15.5.25
       - name: Audit candidate
         run: npm audit --audit-level=high --json > npm-audit-candidate.json
       - uses: actions/upload-artifact@v4
