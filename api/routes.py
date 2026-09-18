@@ -235,6 +235,16 @@ def plan(action: str, payload: dict[str, Any]) -> dict[str, Any]:
 # --- local resources --------------------------------------------------------
 
 
+def is_local_resource_path(path: str) -> bool:
+    """All filesystem/session routes share this deny boundary in cloud mode.
+
+    New filesystem endpoints must be placed in these namespaces (or explicitly
+    added here). Derive/transform/plan must remain detached and path-free.
+    """
+    return any(path == prefix or path.startswith(prefix + "/")
+               for prefix in ("/api/library", "/api/import", "/api/export"))
+
+
 def _method_json(entry: MethodVersion) -> dict[str, Any]:
     return {
         "methodId": entry.method_id,

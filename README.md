@@ -11,6 +11,12 @@ QPEED, and others) and cell-geometry inference (FP, L-level, and xMyU).
 > step semantics and equipment smoke tests are still incomplete. Output is not
 > validated for CTSPro or equipment execution. Prefer `patch-sch` for evidence-gated edits.
 
+## 2026-09 정확성 리뷰와 확장 계획
+
+[한국어 리뷰·배포 정책·단계별 로드맵](docs/CORRECTNESS_REVIEW_2026-09.md)에 구현됨/계획/실험적 상태, resume·출력 복구 한계, cloud 환경 변수와 CI 인수 기준을 정리했습니다. 기존 [장비 증거 로드맵](planning/ROADMAP.md)은 보존합니다.
+
+**장비 실행 승인은 별도입니다.** `equipment_executable=false`를 유지하며 LOOP 수동 검토가 필요합니다. 협력적 lock과 두 파일 예외 복구는 전원 장애 원자성이 아닙니다. Cloud는 TLS/auth gateway와 로컬 자원 비활성화가 필수이며 multi-tenant 운영 승인을 의미하지 않습니다.
+
 ## Installation
 
 ```powershell

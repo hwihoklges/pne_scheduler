@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .atomic_output import staged_path
+
 VALIDATION_MANIFEST_SCHEMA = "pne_scheduler.sch_validation_manifest/v1"
 _REQUIRED_KEYS = {
     "schema",
@@ -213,7 +215,7 @@ def write_validation_manifest(
     if errors:
         raise ValueError("Invalid validation manifest: " + "; ".join(errors))
     rendered = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(rendered, encoding="utf-8")
-    os.replace(temporary, path)
+    with staged_path(path) as temporary:
+        temporary.write_text(rendered, encoding="utf-8")
+        os.replace(temporary, path)
     return path

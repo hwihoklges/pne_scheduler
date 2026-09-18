@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from enum import StrEnum
+
+from .._compat import StrEnum
 
 _MULTI_PATTERN = re.compile(
     r"multi|멀티|stack\s*cell|stackcell|bicell|양면|2multi|8M2U|\d+M\d+U",

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from .._compat import StrEnum
 from ..classify import QpeedVariant, ScheduleCategory
 
 if TYPE_CHECKING:

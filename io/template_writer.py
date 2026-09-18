@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schema.fields import SchFieldDefinition, get_step_fields
+from .atomic_output import output_lock, require_distinct_paths, staged_path
 from .sch_binary import read_sch_binary
 from .validation_manifest import VALIDATION_MANIFEST_SCHEMA
 
@@ -149,6 +150,36 @@ def apply_sch_patch(
     allow_analysis_output: bool = False,
     allow_unverified_fields: bool = False,
 ) -> SchPatchResult:
+    """Publish only validated staged bytes; fail fast on a concurrent writer.
+
+    The returned report describes this publication, not future edits to the
+    destination. Callers persisting a sidecar must retain that digest binding.
+    """
+    template, output = Path(template_path), Path(output_path)
+    require_distinct_paths(template, output)
+    if output.is_symlink() or (output.exists() and not output.is_file()):
+        raise ValueError(f"Invalid output destination: {output}")
+    if not output.parent.is_dir():
+        raise ValueError(f"Output directory does not exist: {output.parent}")
+    with output_lock(output, template), staged_path(output) as staged:
+        result = _apply_sch_patch(
+            template, plan, staged,
+            allow_analysis_output=allow_analysis_output,
+            allow_unverified_fields=allow_unverified_fields,
+        )
+        result.report["output"]["path"] = str(output)
+        os.replace(staged, output)
+        return SchPatchResult(output_path=output, report=result.report)
+
+
+def _apply_sch_patch(
+    template_path: str | Path,
+    plan: SchPatchPlan,
+    output_path: str | Path,
+    *,
+    allow_analysis_output: bool = False,
+    allow_unverified_fields: bool = False,
+) -> SchPatchResult:
     """Write a byte-preserving clone with only declared field ranges changed."""
     if not allow_analysis_output:
         raise ValueError(
@@ -257,9 +288,8 @@ def apply_sch_patch(
     if not changed_offsets.issubset(expected_changed_offsets):
         raise AssertionError("Writer changed bytes outside declared field ranges")
 
-    temporary = output.with_name(f".{output.name}.tmp")
-    temporary.write_bytes(body)
-    os.replace(temporary, output)
+    # output is already uniquely reserved by the public writer.
+    output.write_bytes(body)
 
     written = read_sch_binary(output)
     if (
@@ -269,14 +299,15 @@ def apply_sch_patch(
         or tuple(step.step_no for step in written.steps)
         != tuple(step.step_no for step in doc.steps)
     ):
-        output.unlink(missing_ok=True)
         raise ValueError("Patched output failed structural re-read validation")
 
     from ..tools.compare_sch import compare_sch_files
 
     diff_report = compare_sch_files(template, output)
     diff_summary = diff_report["summary"]
-    output_bytes = bytes(body)
+    output_bytes = output.read_bytes()
+    if output_bytes != bytes(body) or template.read_bytes() != source:
+        raise ValueError("Source or staged output changed during validation")
     validation_checks = [
         {
             "name": "template_sha256",
@@ -305,6 +336,8 @@ def apply_sch_patch(
             and diff_summary["unparsed_changed_byte_count"] == 0,
         },
     ]
+    if not all(check["passed"] for check in validation_checks):
+        raise ValueError("Patched output failed validation checks")
     return SchPatchResult(
         output_path=output,
         report={
