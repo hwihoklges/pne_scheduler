@@ -15,6 +15,8 @@ from .c_rate import (
 from .compiler import compile_steps
 from .duration import (
     DurationEstimate,
+    DurationKind,
+    DurationStatus,
     StepDurationEstimate,
     combine_duration_estimates,
     estimate_step_duration,
@@ -29,6 +31,8 @@ __all__ = [
     "CratePreset",
     "CrateSnapResult",
     "DurationEstimate",
+    "DurationKind",
+    "DurationStatus",
     "StepDurationEstimate",
     "capacity_mAh_from_fraction",
     "c_rate_from_current_mA",

@@ -448,8 +448,8 @@ class WorkspaceModel:
                     step_count=phase.step_count,
                     step_range=phase.step_range_text,
                     duration=(
-                        units.format_duration_ko(phase.duration_seconds)
-                        if phase.duration_seconds
+                        f"{units.format_duration_ko(phase.duration_seconds)} ({phase.duration_status})"
+                        if phase.duration_seconds is not None
                         else "—"
                     ),
                     trust=TRUST_LABELS_KO.get(phase.trust_status, phase.trust_status),

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..ir.cell_profile import CellProfile
+from ..ir.numeric import finite_number
 
 # Writer safety contract: C-rate conversion always uses an explicit project value.
 # Filename/stack geometry inference is display-only and must never feed SCH output.
@@ -63,13 +64,14 @@ class CrateSnapResult:
 
 def is_fast_charge_c_rate(c_rate: float) -> bool:
     """True when C-rate exceeds routine mono/cycle range (>2.5C)."""
+    c_rate = finite_number(c_rate, "c_rate", positive=True)
     return c_rate > FAST_CHARGE_MIN_C_RATE
 
 
 def snap_c_rate(c_rate: float, *, rtol: float = 0.06) -> CrateSnapResult:
     """Map a measured C-rate to the nearest lab preset when within tolerance."""
-    if c_rate <= 0:
-        raise ValueError("c_rate must be positive")
+    c_rate = finite_number(c_rate, "c_rate", positive=True)
+    rtol = finite_number(rtol, "rtol", nonnegative=True)
 
     best: CratePreset | None = None
     best_err = float("inf")
@@ -105,25 +107,32 @@ def preset_values() -> tuple[float, ...]:
 
 
 def current_mA_from_c_rate(c_rate: float, cell: CellProfile) -> float:
-    """I_mA = C_rate × Q_nominal_mAh."""
-    if c_rate <= 0:
-        raise ValueError("c_rate must be positive")
-    return c_rate * cell.nominal_capacity_mAh
+    """I_mA = C_rate × Q_nominal_mAh; invalid/overflow inputs raise ValueError."""
+    cell.validate()
+    c_rate = finite_number(c_rate, "c_rate", positive=True)
+    return finite_number(c_rate * cell.nominal_capacity_mAh, "current_mA", positive=True)
 
 
 def c_rate_from_current_mA(current_mA: float, cell: CellProfile) -> float:
-    if current_mA <= 0:
-        raise ValueError("current_mA must be positive")
-    return current_mA / cell.nominal_capacity_mAh
+    """Invert I=CQ using explicit nominal capacity; reject invalid/overflow values."""
+    cell.validate()
+    current_mA = finite_number(current_mA, "current_mA", positive=True)
+    return finite_number(current_mA / cell.nominal_capacity_mAh, "c_rate", positive=True)
 
 
 def capacity_mAh_from_fraction(fraction: float, cell: CellProfile) -> float:
+    """Convert a cutoff fraction in (0, 1]; reject invalid profiles and overflow."""
+    cell.validate()
+    fraction = finite_number(fraction, "fraction", positive=True)
     if not 0.0 < fraction <= 1.0:
         raise ValueError("fraction must be in (0, 1]")
-    return fraction * cell.nominal_capacity_mAh
+    return finite_number(fraction * cell.nominal_capacity_mAh, "capacity_mAh", positive=True)
 
 
 def validate_current_within_limits(current_mA: float, cell: CellProfile) -> list[str]:
+    """Compare only explicit limits; invalid values raise rather than disappear."""
+    cell.validate()
+    current_mA = finite_number(current_mA, "current_mA", positive=True)
     warnings: list[str] = []
     if cell.max_current_mA is not None and current_mA > cell.max_current_mA:
         warnings.append(

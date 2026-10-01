@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
+from .numeric import finite_number, positive_integer
 
 StepKind = Literal[
     "charge",
@@ -53,6 +54,33 @@ class StepIntent:
     dcr_start_s: float | None = None
     dcr_end_s: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def validate(self) -> None:
+        """Validate numeric domains at use boundaries, retaining editable bad IR.
+
+        Timers/sampling/DCR allow zero; current magnitudes and capacity cutoffs
+        are positive. This does not certify equipment execution or loop topology.
+        """
+        for name in ("c_rate", "cv_cutoff_c_rate", "current_mA", "cv_cutoff_mA"):
+            value = getattr(self, name)
+            if value is not None:
+                finite_number(value, name, positive=True)
+        for name in ("end_time_s", "record_time_s", "record_dV_mV", "dcr_start_s", "dcr_end_s"):
+            value = getattr(self, name)
+            if value is not None:
+                finite_number(value, name, nonnegative=True)
+        for name in ("voltage_v", "end_voltage_v"):
+            value = getattr(self, name)
+            if value is not None:
+                finite_number(value, name)
+        for name, maximum in (("end_capacity_fraction", 1), ("dod_percent", 100)):
+            value = getattr(self, name)
+            if value is not None and finite_number(value, name, positive=True) > maximum:
+                raise ValueError(f"{name} must be in (0, {maximum}]")
+        for name in ("loop_count", "loop_goto_step", "goto_step_id"):
+            value = getattr(self, name)
+            if value is not None:
+                positive_integer(value, name)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -145,9 +145,10 @@ def summarize_project(
             continue
         duration = (
             units.format_duration_ko(phase.duration_seconds)
-            if phase.duration_seconds
+            if phase.duration_seconds is not None
             else "시간 미정"
         )
+        duration += f" ({phase.duration_status})"
         subtitle = f" — {phase.subtitle}" if phase.subtitle else ""
         phase_lines.append(
             f"{phase.position}. {phase.title}{subtitle} "
@@ -158,19 +159,29 @@ def summarize_project(
 
     duration_text = (
         units.format_duration_ko(procedure.duration_seconds)
-        if procedure.duration_seconds
+        if procedure.duration_seconds is not None
         else "미정"
     )
     if procedure.duration_seconds and not procedure.duration_exact:
         duration_text += " (근사)"
+    duration_text += f" ({procedure.duration_status}; configured/nominal)"
+    if procedure.duration_unknown_step_count:
+        duration_text += f" · unknown {procedure.duration_unknown_step_count}"
     finish_text = ""
-    if procedure.duration_seconds:
-        finish_text = "지금 시작하면 " + _finish_label(
-            (start or datetime.now()) + timedelta(seconds=procedure.duration_seconds)
-        ) + " 종료 예정"
+    if procedure.duration_seconds and procedure.duration_status != "incomplete":
+        try:
+            finish_text = "설정/nominal 산술 기준: " + _finish_label(
+                (start or datetime.now()) + timedelta(seconds=procedure.duration_seconds)
+            ) + " (실제 종료 예정 아님)"
+        except OverflowError:
+            finish_text = "Calendar projection unavailable (overflow)"
 
-    warnings: list[str] = []
-    peak = _peak_current(procedure.steps, cell)
+    warnings: list[str] = list(procedure.duration_warnings)
+    try:
+        peak = _peak_current(procedure.steps, cell)
+    except ValueError as exc:
+        peak = None
+        warnings.append(f"Current model unavailable: {exc}")
     if peak and limit and peak > limit + 1e-6:
         warnings.append(
             f"최고 전류 {units.format_current_mA(peak)} 가 한계 "
@@ -216,14 +227,18 @@ def _soc_text(fractions) -> str:
 
 
 def _peak_current(steps, cell: CellProfile) -> float | None:
+    from ..engine.c_rate import current_mA_from_c_rate
+
+    cell.validate()
     best: float | None = None
     for step in steps:
         if step.step_type not in {"charge", "discharge"}:
             continue
+        step.validate()
         if step.current_mA is not None:
             current = abs(float(step.current_mA))
         elif step.c_rate is not None:
-            current = abs(float(step.c_rate)) * cell.nominal_capacity_mAh
+            current = current_mA_from_c_rate(step.c_rate, cell)
         else:
             continue
         best = current if best is None else max(best, current)

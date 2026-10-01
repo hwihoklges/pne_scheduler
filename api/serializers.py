@@ -239,6 +239,9 @@ def views_json(
         "procedure": {
             "durationSeconds": procedure.duration_seconds,
             "durationExact": procedure.duration_exact,
+            "durationStatus": procedure.duration_status,
+            "durationUnknownStepCount": procedure.duration_unknown_step_count,
+            "durationWarnings": list(procedure.duration_warnings),
             "stepCount": len(model.step_rows()),
         },
         "steps": list(model.display_step_rows()) if include_steps else [],

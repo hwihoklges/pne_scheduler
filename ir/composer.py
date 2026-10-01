@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Iterable
 
 from .step_intent import StepIntent
+from .numeric import positive_integer
 
 if TYPE_CHECKING:
     from .cell_profile import CellProfile
@@ -56,7 +57,10 @@ def compose_module_steps(
         for local_index, step in enumerate(fragment, start=1):
             resolved = step
             if step.step_type == "loop":
+                positive_integer(step.loop_count, "loop_count")
                 target = step.loop_goto_step
+                if target is not None:
+                    target = positive_integer(target, "loop_goto_step")
                 if step.loop_target_ref is not None:
                     if target is not None:
                         raise ValueError(
@@ -77,7 +81,7 @@ def compose_module_steps(
                         )
                     target = fragment_start + target - 1
 
-                if target is None or step.loop_count is None or step.loop_count < 1:
+                if target is None or target >= fragment_start + local_index - 1:
                     raise ValueError(
                         f"Module {node.id} LOOP {local_index} requires a target and "
                         "loop_count >= 1"

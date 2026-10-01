@@ -1,5 +1,7 @@
 # SCH Schedule Builder — Structural Analysis & Roadmap
 
+Science validation: [accepted independent review and execution record](../docs/SCIENTIFIC_CORRECTION_PLAN.md).
+
 ## Change History
 
 | Date | Summary |

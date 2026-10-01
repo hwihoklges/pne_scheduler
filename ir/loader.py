@@ -15,6 +15,7 @@ from typing import Any
 
 from ..schema import DEFAULT_SCH_VERSION
 from .cell_profile import CellProfile
+from .numeric import finite_number
 from .equipment_profile import EquipmentProfile
 from .project import (
     ModuleConnection,
@@ -59,7 +60,11 @@ def load_project_lenient(path: Path) -> ProjectLoad:
 
 
 def repair_project_dict(raw: dict[str, Any]) -> ProjectLoad:
-    """Coerce a project dict into a loadable project, listing every repair."""
+    """Coerce editable data and list repairs; invalid explicit limits raise.
+
+    Unlike missing metadata, malformed explicit current/formation limits cannot
+    be silently removed. ProjectLoadError asks the caller to correct the source.
+    """
     repairs: list[str] = []
     schema = str(raw.get("schema") or SCHPROJ_SCHEMA_V1)
     migrated_from = schema if schema == SCHPROJ_SCHEMA_V1 else None
@@ -103,11 +108,18 @@ def repair_project_dict(raw: dict[str, Any]) -> ProjectLoad:
         connections.append(ModuleConnection(source, target))
 
     equipment_raw = raw.get("equipment")
+    if isinstance(equipment_raw, dict) and equipment_raw.get("max_current_mA") is not None:
+        try:
+            finite_number(equipment_raw["max_current_mA"], "equipment.max_current_mA", positive=True)
+        except ValueError as exc:
+            raise ProjectLoadError(f"Invalid explicit equipment limit: {exc}") from exc
     equipment: EquipmentProfile | None = None
     if isinstance(equipment_raw, dict) and equipment_raw.get("unit"):
         try:
             equipment = EquipmentProfile.from_dict(equipment_raw)
-        except TypeError:
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, ValueError):
+                raise ProjectLoadError(f"Invalid explicit equipment profile: {exc}") from exc
             equipment = None
             repairs.append("장비 프로파일을 읽을 수 없어 비웠습니다. 설정 탭에서 다시 지정하세요.")
     elif migrated_from is not None:
@@ -153,8 +165,10 @@ def _repair_cell(raw: Any) -> tuple[CellProfile, list[str]]:
     def number(key: str, fallback: float) -> float:
         value = data.get(key, fallback)
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            if isinstance(value, bool):
+                raise ValueError("boolean is not numeric")
+            return finite_number(float(value), key)
+        except (TypeError, ValueError, OverflowError):
             repairs.append(f"셀 항목 {key} 을(를) 숫자로 읽을 수 없어 {fallback:g} 로 되돌렸습니다.")
             return fallback
 
@@ -177,21 +191,20 @@ def _repair_cell(raw: Any) -> tuple[CellProfile, list[str]]:
     max_current = data.get("max_current_mA")
     if max_current is not None:
         try:
-            max_current = float(max_current)
-            if max_current <= 0:
-                repairs.append("셀 최대 전류가 0 이하여서 비웠습니다.")
-                max_current = None
-        except (TypeError, ValueError):
-            repairs.append("셀 최대 전류를 숫자로 읽을 수 없어 비웠습니다.")
-            max_current = None
+            if isinstance(max_current, bool):
+                raise ValueError("boolean is not numeric")
+            max_current = finite_number(float(max_current), "max_current_mA", positive=True)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ProjectLoadError("Invalid explicit max_current_mA; correct the profile") from exc
 
     formation = data.get("formation_capacity_mAh")
     if formation is not None:
         try:
-            formation = float(formation)
-        except (TypeError, ValueError):
-            repairs.append("화성 용량을 숫자로 읽을 수 없어 비웠습니다.")
-            formation = None
+            if isinstance(formation, bool):
+                raise ValueError("boolean is not numeric")
+            formation = finite_number(float(formation), "formation_capacity_mAh", positive=True)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ProjectLoadError("Invalid explicit formation_capacity_mAh; correct the profile") from exc
 
     return (
         CellProfile(

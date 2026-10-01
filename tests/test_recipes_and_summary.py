@@ -61,7 +61,8 @@ def test_summary_reports_cell_equipment_phases_and_finish_time() -> None:
     assert "PNE02" in text
     assert "1. Formation" in text
     assert "2. QPEED" in text
-    assert "종료 예정" in summary.finish_text
+    assert summary.finish_text == ""  # unknown taper cannot predict a finish timestamp
+    assert "incomplete" in summary.duration_text
     assert summary.total_steps > 100
 
 

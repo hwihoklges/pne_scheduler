@@ -5,10 +5,20 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
+import pytest
+
+import pne_scheduler.validate.gate_d_harness as gate_d_harness
 from pne_scheduler.engine.compiler import compile_steps
 from pne_scheduler.ir.cell_profile import CellProfile
 from pne_scheduler.ir.project import ModuleNode
+from pne_scheduler.ir.step_intent import StepIntent
+from pne_scheduler.io.sch_binary import read_sch_binary
 from pne_scheduler.modules.base import expand_module
+from pne_scheduler.schema.ensol_v612 import (
+    OFF_LOOP_COUNT,
+    OFF_LOOP_GOTO_ENSOL,
+    OFF_LOOP_GOTO_LEGACY,
+)
 from pne_scheduler.validate.gate_d_harness import run_module_pipeline
 
 CELL = CellProfile(nominal_capacity_mAh=80.0, v_max=4.2, v_min=2.5)
@@ -55,6 +65,53 @@ def test_gate_d_cycle_life_pipeline(tmp_path: Path) -> None:
     assert report.topology[-1] == "end"
     assert "charge" in report.topology
     assert "discharge" in report.topology
+
+
+def test_gate_d_loop_comparison_uses_composed_step_numbers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    params = {"loop_count": 3, "rest_s": 30.0}
+    intents = expand_module(
+        ModuleNode(id="cycle_life_1", module_type="cycle_life", params=params), CELL
+    )
+    loop_index = next(index for index, intent in enumerate(intents) if intent.step_type == "loop")
+    target = intents[loop_index].loop_goto_step
+    assert target is not None and 1 <= target <= loop_index
+
+    calls: list[list[StepIntent]] = []
+    original_compile = gate_d_harness.compile_steps
+
+    def tracked_compile(steps: list[StepIntent], cell: CellProfile) -> list[bytes]:
+        calls.append(steps)
+        return original_compile(steps, cell)
+
+    monkeypatch.setattr(gate_d_harness, "compile_steps", tracked_compile)
+    path = tmp_path / "cycle_life_context.sch"
+    report = run_module_pipeline("cycle_life", cell=CELL, output_path=path, params=params)
+
+    assert report.passed, report.mismatches
+    assert len(calls) == 1  # No standalone LOOP in the expected-byte comparison.
+    assert [step.step_type for step in calls[0]] == [step.step_type for step in intents]
+    assert calls[0][loop_index].loop_goto_step == target
+    expected = original_compile(calls[0], CELL)[loop_index]
+    written = read_sch_binary(path).steps[loop_index].record
+    assert struct.unpack_from("<i", written, 0)[0] == loop_index + 1
+    assert struct.unpack_from("<i", written, 8)[0] == struct.unpack_from("<i", expected, 8)[0] == 8
+    for offset, value in (
+        (OFF_LOOP_COUNT, 3),
+        (OFF_LOOP_GOTO_LEGACY, target),
+        (OFF_LOOP_GOTO_ENSOL, target),
+    ):
+        assert struct.unpack_from("<I", written, offset)[0] == value
+        assert struct.unpack_from("<I", expected, offset)[0] == value
+
+
+@pytest.mark.parametrize("prefix, target", [([], 1), ([StepIntent(step_type="rest")], 2)])
+def test_compiler_rejects_loop_without_earlier_target(
+    prefix: list[StepIntent], target: int
+) -> None:
+    with pytest.raises(ValueError, match="LOOP requires a positive count and earlier target"):
+        compile_steps(prefix + [StepIntent(step_type="loop", loop_count=2, loop_goto_step=target)], CELL)
 
 
 def test_gate_d_rpt_pipeline(tmp_path: Path) -> None:
