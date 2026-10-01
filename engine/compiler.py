@@ -48,6 +48,7 @@ from ..schema.fields import (
     OFFSET_N_GOTO_STEP_ID,
 )
 from .c_rate import capacity_mAh_from_fraction, current_mA_from_c_rate
+from ..ir.numeric import finite_number
 
 if TYPE_CHECKING:
     from ..ir.cell_profile import CellProfile
@@ -67,6 +68,7 @@ _CAP_MODE_STEP_TYPES = frozenset(
 
 def compile_steps(intents: list[StepIntent], cell: CellProfile) -> list[bytes]:
     """Compile intents to 612-byte step records."""
+    cell.validate()
     records: list[bytes] = []
     for index, intent in enumerate(intents, start=1):
         records.append(_compile_one_step(index, intent, cell))
@@ -154,6 +156,16 @@ def _pack_sampling(record: bytearray, intent: StepIntent) -> None:
 
 
 def _compile_one_step(step_no: int, intent: StepIntent, cell: CellProfile) -> bytes:
+    intent.validate()
+    for name in ("voltage_v", "end_voltage_v"):
+        value = getattr(intent, name)
+        if value is not None:
+            finite_number(value * 1000.0, f"{name} in mV")
+    if intent.step_type == "loop" and (
+        intent.loop_count is None or intent.loop_goto_step is None
+        or not 1 <= intent.loop_goto_step < step_no
+    ):
+        raise ValueError(f"Step {step_no}: LOOP requires a positive count and earlier target")
     if intent.loop_target_ref is not None:
         raise ValueError(
             f"Step {step_no}: unresolved loop_target_ref {intent.loop_target_ref!r}; "

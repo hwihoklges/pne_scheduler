@@ -254,7 +254,7 @@ class FlowProjectModel:
         warnings = list(validation.warnings)
         for node in self.ordered_modules():
             estimate = estimate_steps_duration(
-                expand_module(node, self.project.cell_profile)
+                expand_module(node, self.project.cell_profile), cell=self.project.cell_profile
             )
             modules.append(
                 ModuleDurationEstimate(node.id, node.module_type, estimate)

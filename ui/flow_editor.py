@@ -784,7 +784,7 @@ class FlowEditorApp:
             )
             estimate = duration_by_id.get(node.id)
             duration_text = (
-                f"~{format_duration(estimate.estimated_seconds)}"
+                f"~{format_duration(estimate.estimated_seconds)} ({estimate.status})"
                 if estimate is not None
                 else "time unknown"
             )
@@ -867,7 +867,7 @@ class FlowEditorApp:
         summary = f"Estimated total: {prefix}{format_duration(total.estimated_seconds)}"
         if total.unknown_step_count:
             summary += f" + {total.unknown_step_count} unknown step execution(s)"
-        summary += " (nominal estimate; CV taper and equipment overhead may be excluded)"
+        summary += f" ({total.status}; configured/nominal subtotal, not elapsed time)"
         self.duration_var.set(summary)
 
 

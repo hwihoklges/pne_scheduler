@@ -40,7 +40,7 @@ def test_formation_duration_is_nominal_c_rate_estimate() -> None:
     estimate = estimate_steps_duration(steps)
 
     assert estimate.estimated_seconds == pytest.approx(72_120.0)
-    assert estimate.is_complete
+    assert not estimate.is_complete  # nominal CC subtotal excludes unknown CV taper
     assert not estimate.is_exact
     assert any("CV taper" in warning for warning in estimate.warnings)
 

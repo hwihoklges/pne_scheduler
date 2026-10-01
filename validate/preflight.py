@@ -53,7 +53,11 @@ def validate_project(
     # The binding current limit is the smaller of the cell's own limit and the
     # target cycler's rating, so naming an under-rated unit is caught here and
     # not only at export time.
-    current_limit_mA = effective_current_limit_mA(cell.max_current_mA, project.equipment)
+    try:
+        cell.validate()
+        current_limit_mA = effective_current_limit_mA(cell.max_current_mA, project.equipment)
+    except ValueError as exc:
+        return PreflightResult((_error("CELL_DOMAIN", str(exc)),))
     limit_source = "cell"
     if (
         project.equipment is not None
@@ -113,6 +117,17 @@ def validate_project(
 
     for index, step in enumerate(steps, start=1):
         object_id = f"step:{index}"
+        try:
+            step.validate()
+            if step.c_rate is not None and step.current_mA is None:
+                current_mA_from_c_rate(step.c_rate, cell)
+            if step.cv_cutoff_c_rate is not None and step.cv_cutoff_mA is None:
+                current_mA_from_c_rate(step.cv_cutoff_c_rate, cell)
+        except ValueError as exc:
+            field_name = str(exc).split()[0]
+            code = {"dod_percent": "DOD_RANGE", "end_capacity_fraction": "CAPACITY_FRACTION_RANGE"}.get(field_name, "STEP_DOMAIN")
+            issues.append(_error(code, str(exc), object_id=object_id, field=field_name))
+            continue
         for field_name in (
             "c_rate", "cv_cutoff_c_rate", "current_mA", "cv_cutoff_mA",
             "voltage_v", "end_voltage_v", "end_time_s", "dod_percent",
@@ -130,8 +145,8 @@ def validate_project(
             issues.append(_error("CV_CUTOFF_RANGE", "CV cutoff C-rate must be positive", object_id=object_id, field="cv_cutoff_c_rate"))
         if step.cv_cutoff_mA is not None and step.cv_cutoff_mA <= 0:
             issues.append(_error("CV_CUTOFF_RANGE", "CV cutoff current must be positive", object_id=object_id, field="cv_cutoff_mA"))
-        if step.end_time_s is not None and step.end_time_s <= 0:
-            issues.append(_error("TIME_RANGE", "End time must be positive", object_id=object_id, field="end_time_s"))
+        if step.end_time_s is not None and step.end_time_s < 0:
+            issues.append(_error("TIME_RANGE", "End time must be nonnegative", object_id=object_id, field="end_time_s"))
         if step.dod_percent is not None and not (0 < step.dod_percent <= 100):
             issues.append(_error("DOD_RANGE", "DOD/SOC percent must be in (0, 100]", object_id=object_id, field="dod_percent"))
         if step.end_capacity_fraction is not None and not (0 < step.end_capacity_fraction <= 1):
@@ -225,7 +240,10 @@ def validate_project(
 
 
 def _finite(value: float) -> bool:
-    return math.isfinite(float(value))
+    try:
+        return not isinstance(value, bool) and math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _error(code: str, message: str, *, object_id: str | None = None, field: str | None = None) -> PreflightIssue:

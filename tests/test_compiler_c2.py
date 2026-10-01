@@ -100,8 +100,9 @@ def test_compiler_absolute_current_and_sampling_overrides() -> None:
 
 
 def test_compiler_loop_writes_gate_b_and_ensol_goto_slots() -> None:
+    # LOOP targets must now resolve to a preceding body; retain all byte assertions.
     record = compile_steps(
-        [
+        [StepIntent(step_type="rest", end_time_s=1) for _ in range(7)] + [
             StepIntent(
                 step_type="loop",
                 loop_goto_step=7,
@@ -109,7 +110,7 @@ def test_compiler_loop_writes_gate_b_and_ensol_goto_slots() -> None:
             )
         ],
         CELL,
-    )[0]
+    )[-1]
 
     assert struct.unpack_from("<i", record, 8)[0] == 8
     assert _u(record, OFF_LOOP_COUNT) == 3

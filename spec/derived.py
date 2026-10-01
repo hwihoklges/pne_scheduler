@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from ..engine.duration import estimate_steps_duration
+from ..engine.c_rate import c_rate_from_current_mA, current_mA_from_c_rate
 from ..ir.cell_profile import CellProfile
+from ..ir.numeric import finite_number
 from ..ir.composer import compose_module_steps
 from ..ir.project import ModuleNode
 from . import units
@@ -50,19 +52,28 @@ def module_derived_values(
         DerivedValue("스텝 수", f"{len(steps)} 스텝", help="이 모듈이 만드는 장비 스텝 개수입니다."),
     ]
 
-    estimate = estimate_steps_duration(steps)
-    if estimate.estimated_seconds > 0:
+    estimate = estimate_steps_duration(steps, cell=cell)
+    if steps:
         text = units.format_duration_ko(estimate.estimated_seconds)
         if not estimate.is_exact:
             text += " (근사)"
+        if not estimate.is_complete:
+            text += f" · incomplete / unknown {estimate.unknown_step_count}"
         values.append(
             DerivedValue(
                 "예상 소요 시간", text,
-                help="시간 종료 조건만으로 계산한 값입니다. 전압/용량 종료 조건은 더 짧게 끝날 수 있습니다.",
+                severity="warning" if not estimate.is_complete else "info",
+                help="Configured/nominal subtotal, not elapsed time or a wall-clock ceiling. " + " ".join(estimate.warnings),
             )
         )
 
-    peak = _peak_current(steps, cell)
+    try:
+        if current_limit_mA is not None:
+            current_limit_mA = finite_number(current_limit_mA, "current_limit_mA", positive=True)
+        peak = _peak_current(steps, cell)
+    except ValueError as exc:
+        values.append(DerivedValue("최고 전류", str(exc), "error"))
+        return tuple(values)
     if peak is not None:
         rate, current = peak
         text = f"{units.format_c_rate(rate)} = {units.format_current_mA(current)}"
@@ -90,16 +101,18 @@ def module_derived_values(
 
 
 def _peak_current(steps, cell: CellProfile) -> tuple[float, float] | None:
+    cell.validate()
     best: tuple[float, float] | None = None
     for step in steps:
         if step.step_type not in {"charge", "discharge"}:
             continue
+        step.validate()
         if step.current_mA is not None:
-            current = abs(float(step.current_mA))
-            rate = current / cell.nominal_capacity_mAh
+            current = step.current_mA
+            rate = c_rate_from_current_mA(current, cell)
         elif step.c_rate is not None:
-            rate = abs(float(step.c_rate))
-            current = rate * cell.nominal_capacity_mAh
+            rate = step.c_rate
+            current = current_mA_from_c_rate(rate, cell)
         else:
             continue
         if best is None or current > best[1]:

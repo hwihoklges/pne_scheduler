@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any
+from .numeric import finite_number
 
 from ..schema.equipment_registry import (
     get_dominant_layout_for_unit,
@@ -32,6 +33,10 @@ class EquipmentProfile:
     source: str = "manual"
     layout_confirmed: bool = False
     notes: str = ""
+
+    def __post_init__(self) -> None:
+        if self.max_current_mA is not None:
+            finite_number(self.max_current_mA, "max_current_mA", positive=True)
 
     @property
     def layout_key(self) -> str | None:
@@ -109,12 +114,12 @@ def effective_current_limit_mA(
 ) -> float | None:
     """The binding limit: the smaller of the cell's and the cycler's."""
     limits = [
-        value
+        finite_number(value, "max_current_mA", positive=True)
         for value in (
             cell_max_current_mA,
             equipment.max_current_mA if equipment else None,
         )
-        if value
+        if value is not None
     ]
     return min(limits) if limits else None
 

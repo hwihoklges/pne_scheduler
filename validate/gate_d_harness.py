@@ -149,9 +149,11 @@ def run_module_pipeline(
             f"Binary step count {binary.step_count} != intents {len(intents)}"
         )
 
-    for intent, step in zip(intents, binary.steps):
+    # Use the records compiled with the complete schedule: a LOOP cannot be
+    # compiled as step 1 because its target must precede its actual step number.
+    for expected_record, step in zip(records, binary.steps):
         written = struct.unpack_from("<i", step.record, 8)[0] & 0xFFFF
-        expected = struct.unpack_from("<i", compile_steps([intent], cell)[0], 8)[0] & 0xFFFF
+        expected = struct.unpack_from("<i", expected_record, 8)[0] & 0xFFFF
         if written != expected:
             mismatches.append(
                 f"Step {step.step_no}: type code {written:#x} != expected {expected:#x}"

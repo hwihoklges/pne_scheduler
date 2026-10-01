@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..engine.duration import estimate_steps_duration
+from ..engine.duration import DurationStatus, estimate_steps_duration
 from .cell_profile import CellProfile
 from .project import ModuleConnection, ModuleNode, ScheduleProject
 from .step_intent import StepIntent
@@ -35,6 +35,9 @@ class PhaseView:
     trust_status: str
     advanced: bool = False
     error: str = ""
+    duration_status: DurationStatus = "incomplete"
+    duration_unknown_step_count: int = 0
+    duration_warnings: tuple[str, ...] = ()
 
     @property
     def step_range_text(self) -> str:
@@ -53,6 +56,9 @@ class ProcedureView:
     duration_seconds: float | None
     duration_exact: bool
     errors: tuple[str, ...] = ()
+    duration_status: DurationStatus = "incomplete"
+    duration_unknown_step_count: int = 0
+    duration_warnings: tuple[str, ...] = ()
 
     @property
     def is_expandable(self) -> bool:
@@ -194,7 +200,7 @@ def build_procedure(project: ScheduleProject) -> ProcedureView:
 
         if fragment and fragment[-1].step_type == "end":
             fragment = fragment[:-1]
-        estimate = estimate_steps_duration(fragment)
+        estimate = estimate_steps_duration(fragment, cell=cell)
         all_steps.extend(fragment)
         phases.append(
             PhaseView(
@@ -208,6 +214,9 @@ def build_procedure(project: ScheduleProject) -> ProcedureView:
                 last_step=cursor + len(fragment) - 1 if fragment else cursor,
                 duration_seconds=estimate.estimated_seconds,
                 duration_exact=estimate.is_exact,
+                duration_status=estimate.status,
+                duration_unknown_step_count=estimate.unknown_step_count,
+                duration_warnings=estimate.warnings,
                 trust_status=spec.trust_status if spec else "prototype",
                 advanced=bool(spec and spec.advanced_only),
             )
@@ -220,6 +229,7 @@ def build_procedure(project: ScheduleProject) -> ProcedureView:
     steps: tuple[StepIntent, ...] = ()
     duration_seconds: float | None = None
     duration_exact = False
+    total = None
     if not errors:
         try:
             composed = compose_module_steps(ordered, cell)
@@ -227,7 +237,7 @@ def build_procedure(project: ScheduleProject) -> ProcedureView:
             errors.append(str(exc))
         else:
             steps = tuple(composed)
-            total = estimate_steps_duration(list(composed))
+            total = estimate_steps_duration(list(composed), cell=cell)
             duration_seconds = total.estimated_seconds
             duration_exact = total.is_exact
     if not steps:
@@ -240,6 +250,9 @@ def build_procedure(project: ScheduleProject) -> ProcedureView:
         duration_seconds=duration_seconds,
         duration_exact=duration_exact,
         errors=tuple(errors),
+        duration_status=total.status if total is not None else "incomplete",
+        duration_unknown_step_count=total.unknown_step_count if total is not None else len(errors),
+        duration_warnings=total.warnings if total is not None else tuple(errors),
     )
 
 

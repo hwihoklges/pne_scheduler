@@ -171,7 +171,14 @@ export interface Views {
     derived: { label: string; text: string; severity: string; help: string }[];
     sections: { title: string; fields: FormFieldView[] }[];
   };
-  procedure: { durationSeconds: number | null; durationExact: boolean; stepCount: number };
+  procedure: {
+    durationSeconds: number | null;
+    durationExact: boolean;
+    durationStatus: "configured" | "nominal" | "incomplete";
+    durationUnknownStepCount: number;
+    durationWarnings: string[];
+    stepCount: number;
+  };
   steps: Record<string, string>[];
   canEditSteps: boolean;
   customSteps: {
